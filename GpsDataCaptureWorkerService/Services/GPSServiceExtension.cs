@@ -23,6 +23,10 @@ namespace GpsDataCaptureWorkerService.Services
             services.AddSingleton<IApiSenderService, ApiSenderService>();
             services.AddSingleton<ApiSenderService>();
             
+            // Register Azure Storage service
+            services.AddSingleton<IAzureStorageService, AzureStorageService>();
+            services.AddSingleton<AzureStorageService>();
+            
             // Add HttpClient factory for proper lifecycle management
             services.AddHttpClient();
 

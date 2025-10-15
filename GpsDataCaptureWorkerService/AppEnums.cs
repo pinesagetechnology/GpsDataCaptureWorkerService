@@ -4,6 +4,10 @@
     {
         SaveToFile,
         SendToApi,
-        Both
+        SendToAzureStorage,
+        FileAndApi,
+        FileAndAzure,
+        ApiAndAzure,
+        All
     }
 }

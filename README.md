@@ -26,10 +26,22 @@ A cross-platform .NET 8.0 worker service for capturing GPS data from NMEA-compat
 - **Queue-Based**: Prevents data loss during network issues
 - **Configurable Timeout**: Set API timeout and retry attempts
 
+### ☁️ Azure Storage Integration
+- **Azure Blob Storage**: Upload GPS data directly to Azure Blob Storage
+- **Batch Processing**: Configurable batch sizes to reduce uploads
+- **Retry with Exponential Backoff**: Automatic retry on failures
+- **Organized Structure**: Data organized by device ID, year, month, and day
+- **Metadata**: Each blob includes metadata (record count, timestamps, device ID)
+- **JSON Format**: Data uploaded as JSON with optional pretty printing
+
 ### 🔧 Operating Modes
 - `SaveToFile` - Save GPS data to local files only
 - `SendToApi` - Send GPS data to API endpoint only
-- `Both` - Save locally and send to API
+- `SendToAzureStorage` - Upload GPS data to Azure Blob Storage only
+- `FileAndApi` - Save locally and send to API
+- `FileAndAzure` - Save locally and upload to Azure Storage
+- `ApiAndAzure` - Send to API and upload to Azure Storage
+- `All` - Save locally, send to API, and upload to Azure Storage
 
 ### 🖥️ Platform Support
 - **Windows**: Runs as a Windows Service
@@ -56,14 +68,17 @@ Edit `appsettings.json`:
     "PortName": null,
     "AutoDetectPort": true,
     "CaptureIntervalSeconds": 5,
+    "EnableLogging": true,
     "SaveFormats": [ "csv", "ndjson" ],
     "DataDirectory": "gps_data",
     "ApiEndpoint": "https://api.example.com/gps/data",
     "ApiKey": "",
     "ApiTimeoutSeconds": 30,
+    "AzureStorageConnectionString": "",
+    "AzureStorageContainerName": "gps-data",
+    "AzureStoragePrettyJson": false,
     "RetryAttempts": 3,
-    "BatchSize": 10,
-    "EnableLogging": true
+    "BatchSize": 10
   }
 }
 ```
@@ -72,18 +87,27 @@ Edit `appsettings.json`:
 
 | Setting | Type | Description | Default |
 |---------|------|-------------|---------|
-| `Mode` | enum | Operating mode: `SaveToFile`, `SendToApi`, `Both` | `SaveToFile` |
+| **General GPS Settings** | | | |
+| `Mode` | enum | Operating mode (see modes above) | `SaveToFile` |
 | `BaudRate` | int | Serial port baud rate | `4800` |
 | `PortName` | string | Specific port name (e.g., `COM3`, `/dev/ttyUSB0`) | `null` (auto-detect) |
 | `AutoDetectPort` | bool | Automatically detect GPS port | `true` |
 | `CaptureIntervalSeconds` | int | Seconds between data captures | `5` |
+| `EnableLogging` | bool | Enable detailed logging | `true` |
+| **File Storage Settings** | | | |
 | `SaveFormats` | array | File formats: `csv`, `json`, `ndjson` | `["csv", "ndjson"]` |
 | `DataDirectory` | string | Directory for saved files | `gps_data` |
+| **API Settings** | | | |
 | `ApiEndpoint` | string | API endpoint URL | - |
 | `ApiKey` | string | API authentication key | - |
 | `ApiTimeoutSeconds` | int | API request timeout | `30` |
-| `RetryAttempts` | int | Number of retry attempts for API | `3` |
-| `BatchSize` | int | Number of records per API batch | `10` |
+| **Azure Storage Settings** | | | |
+| `AzureStorageConnectionString` | string | Azure Storage account connection string | - |
+| `AzureStorageContainerName` | string | Azure Blob Storage container name | `gps-data` |
+| `AzureStoragePrettyJson` | bool | Format JSON with indentation | `false` |
+| **Common Settings** | | | |
+| `RetryAttempts` | int | Number of retry attempts (API/Azure) | `3` |
+| `BatchSize` | int | Number of records per batch (API/Azure) | `10` |
 
 ### Running the Service
 
@@ -157,6 +181,101 @@ sudo usermod -a -G dialout $USER
 # Log out and log back in for changes to take effect
 ```
 
+## Using Azure Storage
+
+### Setup
+
+1. **Create an Azure Storage Account** in the Azure Portal
+
+2. **Get the Connection String**:
+   - Navigate to your storage account in the Azure Portal
+   - Go to "Access keys" under Security + networking
+   - Copy the connection string
+
+3. **Configure the Service**:
+   
+   Edit `appsettings.json`:
+   ```json
+   {
+     "GpsSettings": {
+       "Mode": "SendToAzureStorage",
+       "AzureStorageConnectionString": "DefaultEndpointsProtocol=https;AccountName=myaccount;AccountKey=...",
+       "AzureStorageContainerName": "gps-data",
+       "AzureStoragePrettyJson": false,
+       "BatchSize": 10,
+       "RetryAttempts": 3
+     }
+   }
+   ```
+
+### Azure Storage Structure
+
+GPS data is organized in the following blob structure:
+
+```
+gps-data/                                    (container)
+  └── {device_id}/                           (e.g., "raspberrypi")
+      └── {year}/                            (e.g., "2024")
+          └── {month}/                       (e.g., "10")
+              └── {day}/                     (e.g., "15")
+                  └── gps_data_{timestamp}_{guid}.json
+```
+
+**Example blob path:**
+```
+gps-data/raspberrypi/2024/10/15/gps_data_20241015_143025_a1b2c3d4e5f6.json
+```
+
+### Blob Metadata
+
+Each uploaded blob includes metadata:
+
+| Metadata Key | Description |
+|--------------|-------------|
+| `RecordCount` | Number of GPS records in the file |
+| `DeviceId` | Device identifier |
+| `UploadTimestamp` | When the file was uploaded |
+| `FirstRecordTime` | Timestamp of first GPS record |
+| `LastRecordTime` | Timestamp of last GPS record |
+
+### Mode Examples
+
+**Upload to Azure Storage only:**
+```json
+{
+  "GpsSettings": {
+    "Mode": "SendToAzureStorage"
+  }
+}
+```
+
+**Save locally and upload to Azure:**
+```json
+{
+  "GpsSettings": {
+    "Mode": "FileAndAzure"
+  }
+}
+```
+
+**Send to API and Azure:**
+```json
+{
+  "GpsSettings": {
+    "Mode": "ApiAndAzure"
+  }
+}
+```
+
+**Do everything (save locally, send to API, and upload to Azure):**
+```json
+{
+  "GpsSettings": {
+    "Mode": "All"
+  }
+}
+```
+
 ## Architecture
 
 ### Components
@@ -176,9 +295,13 @@ sudo usermod -a -G dialout $USER
               │    ├─> JSON Writer
               │    └─> NDJSON Writer
               │
-              └──> ApiSenderService
+              ├──> ApiSenderService
+              │    ├─> Batch Queue
+              │    └─> HttpClient
+              │
+              └──> AzureStorageService
                    ├─> Batch Queue
-                   └─> HttpClient
+                   └─> BlobServiceClient
 ```
 
 ### Data Flow
@@ -189,6 +312,7 @@ sudo usermod -a -G dialout $USER
 4. **Worker** receives valid GPS data via event
 5. **Storage** saves to configured file formats (thread-safe)
 6. **API Sender** queues and batches data for API transmission
+7. **Azure Storage** queues and batches data for upload to Azure Blob Storage
 
 ## GPS Data Format
 

@@ -131,8 +131,46 @@ fi
 echo -e "${GREEN}✓${NC} Application published to ${INSTALL_DIR}"
 echo ""
 
-# Step 5: Update appsettings.json with shared data directory
-echo -e "${YELLOW}Step 5: Configuring application settings...${NC}"
+# Step 5: Configure Azure Storage (if needed)
+echo -e "${YELLOW}Step 5: Azure Storage Configuration${NC}"
+echo ""
+echo "Do you want to configure Azure Storage for GPS data upload?"
+echo "This allows the service to automatically upload GPS data to Azure Blob Storage."
+echo ""
+read -p "Configure Azure Storage? (y/N): " CONFIGURE_AZURE
+
+AZURE_CONNECTION=""
+AZURE_CONTAINER="gps-data"
+
+if [[ "$CONFIGURE_AZURE" =~ ^[Yy]$ ]]; then
+    echo ""
+    echo -e "${BLUE}Azure Storage Configuration:${NC}"
+    echo ""
+    
+    # Prompt for connection string
+    echo "Enter your Azure Storage connection string:"
+    echo "(You can find this in Azure Portal > Storage Account > Access Keys)"
+    read -p "Connection String: " AZURE_CONNECTION
+    
+    # Prompt for container name with default
+    echo ""
+    echo "Enter the container name for GPS data:"
+    read -p "Container Name [gps-data]: " AZURE_CONTAINER_INPUT
+    
+    # Use default if empty
+    if [ -n "$AZURE_CONTAINER_INPUT" ]; then
+        AZURE_CONTAINER="$AZURE_CONTAINER_INPUT"
+    fi
+    
+    echo ""
+    echo -e "${GREEN}✓${NC} Azure Storage will be configured with container: ${AZURE_CONTAINER}"
+else
+    echo -e "${BLUE}ℹ${NC} Skipping Azure Storage configuration"
+fi
+echo ""
+
+# Step 6: Update appsettings.json with shared data directory and Azure Storage
+echo -e "${YELLOW}Step 6: Configuring application settings...${NC}"
 APPSETTINGS_FILE="${INSTALL_DIR}/appsettings.json"
 
 if [ -f "${APPSETTINGS_FILE}" ]; then
@@ -142,21 +180,30 @@ if [ -f "${APPSETTINGS_FILE}" ]; then
     # Update DataDirectory using sed
     sed -i "s|\"DataDirectory\": \"[^\"]*\"|\"DataDirectory\": \"${DATA_DIR}\"|g" "${APPSETTINGS_FILE}"
     echo -e "${GREEN}✓${NC} Updated DataDirectory to: ${DATA_DIR}"
+    
+    # Update Azure Storage settings if configured
+    if [ -n "$AZURE_CONNECTION" ]; then
+        sed -i "s|\"AzureStorageConnectionString\": \"[^\"]*\"|\"AzureStorageConnectionString\": \"${AZURE_CONNECTION}\"|g" "${APPSETTINGS_FILE}"
+        sed -i "s|\"AzureStorageContainerName\": \"[^\"]*\"|\"AzureStorageContainerName\": \"${AZURE_CONTAINER}\"|g" "${APPSETTINGS_FILE}"
+        echo -e "${GREEN}✓${NC} Updated Azure Storage connection string"
+        echo -e "${GREEN}✓${NC} Updated Azure Storage container name to: ${AZURE_CONTAINER}"
+    fi
+    
     echo -e "${BLUE}ℹ${NC} Backup saved: ${APPSETTINGS_FILE}.bak"
 else
     echo -e "${RED}Warning: appsettings.json not found${NC}"
 fi
 echo ""
 
-# Step 6: Set ownership and permissions on install directory
-echo -e "${YELLOW}Step 6: Setting permissions...${NC}"
+# Step 7: Set ownership and permissions on install directory
+echo -e "${YELLOW}Step 7: Setting permissions...${NC}"
 chown -R ${SERVICE_USER}:${SERVICE_GROUP} ${INSTALL_DIR}
 chmod +x ${INSTALL_DIR}/${APP_NAME}
 echo -e "${GREEN}✓${NC} Set ownership and executable permissions"
 echo ""
 
-# Step 7: Create systemd service file
-echo -e "${YELLOW}Step 7: Creating systemd service file...${NC}"
+# Step 8: Create systemd service file
+echo -e "${YELLOW}Step 8: Creating systemd service file...${NC}"
 cat > ${SERVICE_FILE} << EOF
 [Unit]
 Description=GPS Data Capture Worker Service
@@ -195,15 +242,15 @@ EOF
 echo -e "${GREEN}✓${NC} Created service file: ${SERVICE_FILE}"
 echo ""
 
-# Step 8: Reload systemd and enable service
-echo -e "${YELLOW}Step 8: Enabling systemd service...${NC}"
+# Step 9: Reload systemd and enable service
+echo -e "${YELLOW}Step 9: Enabling systemd service...${NC}"
 systemctl daemon-reload
 systemctl enable ${SERVICE_NAME}
 echo -e "${GREEN}✓${NC} Service enabled"
 echo ""
 
-# Step 9: Start the service
-echo -e "${YELLOW}Step 9: Starting service...${NC}"
+# Step 10: Start the service
+echo -e "${YELLOW}Step 10: Starting service...${NC}"
 systemctl start ${SERVICE_NAME}
 sleep 2
 
@@ -216,8 +263,8 @@ else
 fi
 echo ""
 
-# Step 10: Show status
-echo -e "${YELLOW}Step 10: Service Status${NC}"
+# Step 11: Show status
+echo -e "${YELLOW}Step 11: Service Status${NC}"
 systemctl status ${SERVICE_NAME} --no-pager -l
 echo ""
 

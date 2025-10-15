@@ -11,6 +11,7 @@ namespace GpsDataCaptureWorkerService
         private readonly GpsReaderService _gpsReader;
         private readonly FileStorageService? _fileStorage;
         private readonly ApiSenderService? _apiSender;
+        private readonly AzureStorageService? _azureStorage;
         private int _dataCounter;
         private int _invalidDataCounter;
 
@@ -18,20 +19,36 @@ namespace GpsDataCaptureWorkerService
             IOptions<GpsSettings> settings,
             GpsReaderService gpsReader,
             FileStorageService fileStorage,
-            ApiSenderService apiSender)
+            ApiSenderService apiSender,
+            AzureStorageService azureStorage)
         {
             _logger = logger;
             _settings = settings.Value;
             _gpsReader = gpsReader;
 
-            if (_settings.Mode == DataMode.SaveToFile || _settings.Mode == DataMode.Both)
+            // Initialize services based on mode
+            if (_settings.Mode == DataMode.SaveToFile || 
+                _settings.Mode == DataMode.FileAndApi || 
+                _settings.Mode == DataMode.FileAndAzure || 
+                _settings.Mode == DataMode.All)
             {
                 _fileStorage = fileStorage;
             }
 
-            if (_settings.Mode == DataMode.SendToApi || _settings.Mode == DataMode.Both)
+            if (_settings.Mode == DataMode.SendToApi || 
+                _settings.Mode == DataMode.FileAndApi || 
+                _settings.Mode == DataMode.ApiAndAzure || 
+                _settings.Mode == DataMode.All)
             {
                 _apiSender = apiSender;
+            }
+
+            if (_settings.Mode == DataMode.SendToAzureStorage || 
+                _settings.Mode == DataMode.FileAndAzure || 
+                _settings.Mode == DataMode.ApiAndAzure || 
+                _settings.Mode == DataMode.All)
+            {
+                _azureStorage = azureStorage;
             }
         }
 
@@ -82,7 +99,11 @@ namespace GpsDataCaptureWorkerService
 
         private bool ValidateConfiguration()
         {
-            if (_settings.Mode == DataMode.SendToApi || _settings.Mode == DataMode.Both)
+            // Validate API settings
+            if (_settings.Mode == DataMode.SendToApi || 
+                _settings.Mode == DataMode.FileAndApi || 
+                _settings.Mode == DataMode.ApiAndAzure || 
+                _settings.Mode == DataMode.All)
             {
                 if (string.IsNullOrEmpty(_settings.ApiEndpoint))
                 {
@@ -93,7 +114,27 @@ namespace GpsDataCaptureWorkerService
                 _logger.LogInformation("API endpoint configured: {Endpoint}", _settings.ApiEndpoint);
             }
 
-            if (_settings.Mode == DataMode.SaveToFile || _settings.Mode == DataMode.Both)
+            // Validate Azure Storage settings
+            if (_settings.Mode == DataMode.SendToAzureStorage || 
+                _settings.Mode == DataMode.FileAndAzure || 
+                _settings.Mode == DataMode.ApiAndAzure || 
+                _settings.Mode == DataMode.All)
+            {
+                if (string.IsNullOrEmpty(_settings.AzureStorageConnectionString))
+                {
+                    _logger.LogError("Azure Storage connection string not configured but {Mode} mode is enabled!", _settings.Mode);
+                    return false;
+                }
+
+                _logger.LogInformation("Azure Storage configured. Container: {Container}", 
+                    _settings.AzureStorageContainerName);
+            }
+
+            // Validate File Storage settings
+            if (_settings.Mode == DataMode.SaveToFile || 
+                _settings.Mode == DataMode.FileAndApi || 
+                _settings.Mode == DataMode.FileAndAzure || 
+                _settings.Mode == DataMode.All)
             {
                 _logger.LogInformation("File storage enabled. Formats: {Formats}",
                     string.Join(", ", _settings.SaveFormats));
@@ -171,6 +212,12 @@ namespace GpsDataCaptureWorkerService
                     {
                         _apiSender.QueueData(data);
                     }
+
+                    // Send to Azure Storage if enabled
+                    if (_azureStorage != null)
+                    {
+                        _azureStorage.QueueData(data);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -213,6 +260,13 @@ namespace GpsDataCaptureWorkerService
                 _logger.LogInformation("Flushing remaining API data...");
                 await _apiSender.FlushAsync();
                 _apiSender.Dispose();
+            }
+
+            if (_azureStorage != null)
+            {
+                _logger.LogInformation("Flushing remaining Azure Storage data...");
+                await _azureStorage.FlushAsync();
+                _azureStorage.Dispose();
             }
 
             if (_fileStorage != null)
