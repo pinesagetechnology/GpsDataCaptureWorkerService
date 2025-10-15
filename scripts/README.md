@@ -1,18 +1,21 @@
 # GPS Data Capture - Installation Scripts
 
-This folder contains scripts for installing the GPS Data Capture Worker Service as a systemd service on Linux systems (including Raspberry Pi).
+This folder contains scripts for installing the GPS Data Capture Worker Service on Linux (systemd) and Windows systems.
 
 ## Scripts
 
-### 1. `install-systemd.sh`
-Installs the GPS Data Capture service as a systemd service with shared data access.
+### 1. `install-systemd.sh` (Linux/Raspberry Pi)
+Installs the GPS Data Capture service as a systemd service with shared data access and Azure Storage configuration.
 
-### 2. `uninstall-systemd.sh`
+### 2. `install-windows.ps1` (Windows)
+Installs the GPS Data Capture service as a Windows Service with Azure Storage configuration.
+
+### 3. `uninstall-systemd.sh` (Linux/Raspberry Pi)
 Removes the GPS Data Capture service and optionally cleans up data.
 
 ## Quick Start
 
-### Installation
+### Linux/Raspberry Pi Installation
 
 ```bash
 # Make script executable
@@ -24,6 +27,28 @@ sudo scripts/install-systemd.sh
 # Install for x64 Linux
 sudo scripts/install-systemd.sh linux-x64
 ```
+
+**During installation, you'll be prompted:**
+- **Azure Storage Configuration**: Option to configure Azure Blob Storage upload
+  - If you choose "Yes", you'll need to provide:
+    - Azure Storage connection string
+    - Container name (default: `gps-data`)
+  - If you choose "No", the service will work in file-only or API mode
+
+### Windows Installation
+
+```powershell
+# Run PowerShell as Administrator
+cd scripts
+.\install-windows.ps1
+```
+
+**During installation, you'll be prompted:**
+- **Azure Storage Configuration**: Option to configure Azure Blob Storage upload
+  - If you choose "Yes", you'll need to provide:
+    - Azure Storage connection string
+    - Container name (default: `gps-data`)
+  - If you choose "No", the service will work in file-only or API mode
 
 ### Uninstallation
 
@@ -40,27 +65,44 @@ sudo scripts/uninstall-systemd.sh --keep-data
 
 ## What the Installation Does
 
-### 1. **Creates Service User & Group**
+### 1. **Creates Service User & Group** (Linux only)
 - User: `gpsservice`
 - Group: `gpsdata`
 - Added to `dialout` group for serial port access
 
 ### 2. **Creates Shared Data Directory**
-- Location: `/var/gpsdatacapture/`
-- Permissions: `775` (rwxrwxr-x)
-- Group: `gpsdata`
-- SGID bit set (new files inherit group)
+- Linux: `/var/gpsdatacapture/`
+- Windows: `C:\ProgramData\GpsDataCapture\`
+- Permissions: `775` (rwxrwxr-x) on Linux
+- SGID bit set (new files inherit group) on Linux
 
 ### 3. **Installs Application**
-- Location: `/opt/gpsdatacapture/`
+- Linux: `/opt/gpsdatacapture/`
+- Windows: `C:\Services\GpsDataCapture\`
 - Self-contained .NET deployment
 - Configured to use shared data directory
 
-### 4. **Sets Up Systemd Service**
-- Service name: `gpsdatacapture`
-- Auto-starts on boot
-- Runs as `gpsservice` user
-- Logs to systemd journal
+### 4. **Prompts for Azure Storage Configuration** ✨ NEW
+- Optionally configure Azure Blob Storage for GPS data upload
+- If configured:
+  - Updates `appsettings.json` with connection string
+  - Sets container name (default: `gps-data`)
+  - Service will automatically upload GPS data to Azure
+- If skipped:
+  - Service works in file-only or API mode
+  - Can be configured later by editing `appsettings.json`
+
+### 5. **Sets Up Service**
+- **Linux**: Systemd service
+  - Service name: `gpsdatacapture`
+  - Auto-starts on boot
+  - Runs as `gpsservice` user
+  - Logs to systemd journal
+- **Windows**: Windows Service
+  - Service name: `GpsDataCaptureService`
+  - Auto-starts on boot
+  - Runs as Local System
+  - Logs to Event Viewer
 
 ## Data Access Configuration
 
@@ -238,10 +280,96 @@ sudo nano /opt/gpsdatacapture/appsettings.json
 sudo systemctl restart gpsdatacapture
 ```
 
+## Azure Storage Configuration
+
+### During Installation
+
+The installation script will prompt you to configure Azure Storage. This is the easiest way to set it up.
+
+**Example interaction:**
+```bash
+Do you want to configure Azure Storage for GPS data upload?
+This allows the service to automatically upload GPS data to Azure Blob Storage.
+
+Configure Azure Storage? (y/N): y
+
+Azure Storage Configuration:
+
+Enter your Azure Storage connection string:
+(You can find this in Azure Portal > Storage Account > Access Keys)
+Connection String: DefaultEndpointsProtocol=https;AccountName=myaccount;AccountKey=...
+
+Enter the container name for GPS data:
+Container Name [gps-data]: 
+
+✓ Azure Storage will be configured with container: gps-data
+```
+
+### After Installation
+
+If you skipped Azure Storage configuration during installation, you can configure it later:
+
+**Linux:**
+```bash
+# Edit appsettings.json
+sudo nano /opt/gpsdatacapture/appsettings.json
+
+# Update these settings:
+# "Mode": "SendToAzureStorage"  (or "FileAndAzure", "ApiAndAzure", "All")
+# "AzureStorageConnectionString": "DefaultEndpointsProtocol=https;..."
+# "AzureStorageContainerName": "gps-data"
+
+# Restart service
+sudo systemctl restart gpsdatacapture
+```
+
+**Windows:**
+```powershell
+# Edit appsettings.json
+notepad C:\Services\GpsDataCapture\appsettings.json
+
+# Update these settings:
+# "Mode": "SendToAzureStorage"  (or "FileAndAzure", "ApiAndAzure", "All")
+# "AzureStorageConnectionString": "DefaultEndpointsProtocol=https;..."
+# "AzureStorageContainerName": "gps-data"
+
+# Restart service
+Restart-Service -Name GpsDataCaptureService
+```
+
+### Getting Azure Storage Connection String
+
+1. Sign in to [Azure Portal](https://portal.azure.com)
+2. Navigate to your Storage Account
+3. Go to **Security + networking** > **Access keys**
+4. Click **Show keys**
+5. Copy the **Connection string** from key1 or key2
+
+### Verifying Azure Storage Upload
+
+**Linux:**
+```bash
+# Check logs for Azure upload messages
+sudo journalctl -u gpsdatacapture -f | grep Azure
+
+# Look for:
+# "Successfully uploaded X GPS records to Azure Storage: ..."
+```
+
+**Windows:**
+```powershell
+# Check Event Viewer
+Get-EventLog -LogName Application -Source GpsDataCaptureWorkerService -Newest 20
+
+# Or view in Event Viewer GUI:
+# Windows Logs > Application > Filter by Source: GpsDataCaptureWorkerService
+```
+
 ## Updating the Service
 
 To update to a new version:
 
+**Linux:**
 ```bash
 # Stop the service
 sudo systemctl stop gpsdatacapture
@@ -251,6 +379,20 @@ git pull
 
 # Run installation script (will update in place)
 sudo scripts/install-systemd.sh
+
+# Service will auto-start
+```
+
+**Windows:**
+```powershell
+# Stop the service
+Stop-Service -Name GpsDataCaptureService
+
+# Pull latest code
+git pull
+
+# Run installation script (will update in place)
+.\scripts\install-windows.ps1
 
 # Service will auto-start
 ```
