@@ -104,8 +104,42 @@ Pop-Location
 Write-Success "✓ Application published to $InstallDir"
 Write-Host ""
 
-# Step 4: Configure Azure Storage (if needed)
-Write-Warning "Step 4: Azure Storage Configuration"
+# Step 4: Configure API Endpoint (if needed)
+Write-Warning "Step 4: API Endpoint Configuration"
+Write-Host ""
+Write-Host "Do you want to configure an API endpoint to send GPS data?"
+Write-Host "This allows the service to automatically send GPS data to your API."
+Write-Host ""
+
+$configureApi = Read-Host "Configure API Endpoint? (y/N)"
+
+$apiEndpoint = ""
+$apiKey = ""
+
+if ($configureApi -match '^[Yy]$') {
+    Write-Host ""
+    Write-Info "API Configuration:"
+    Write-Host ""
+    
+    # Prompt for API endpoint
+    Write-Host "Enter your API endpoint URL:"
+    Write-Host "(Example: https://api.example.com/gps/data)"
+    $apiEndpoint = Read-Host "API Endpoint"
+    
+    # Prompt for API key (optional)
+    Write-Host ""
+    Write-Host "Enter your API key (leave empty if not required):"
+    $apiKey = Read-Host "API Key"
+    
+    Write-Host ""
+    Write-Success "✓ API will be configured with endpoint: $apiEndpoint"
+} else {
+    Write-Info "ℹ Skipping API configuration"
+}
+Write-Host ""
+
+# Step 5: Configure Azure Storage (if needed)
+Write-Warning "Step 5: Azure Storage Configuration"
 Write-Host ""
 Write-Host "Do you want to configure Azure Storage for GPS data upload?"
 Write-Host "This allows the service to automatically upload GPS data to Azure Blob Storage."
@@ -143,8 +177,8 @@ if ($configureAzure -match '^[Yy]$') {
 }
 Write-Host ""
 
-# Step 5: Update appsettings.json
-Write-Warning "Step 5: Configuring application settings..."
+# Step 6: Update appsettings.json
+Write-Warning "Step 6: Configuring application settings..."
 $appSettingsFile = Join-Path $InstallDir "appsettings.json"
 
 if (Test-Path $appSettingsFile) {
@@ -158,12 +192,38 @@ if (Test-Path $appSettingsFile) {
     $appSettings.GpsSettings.DataDirectory = $DataDir
     Write-Success "✓ Updated DataDirectory to: $DataDir"
     
+    # Update API settings if configured
+    if ($apiEndpoint) {
+        $appSettings.GpsSettings.ApiEndpoint = $apiEndpoint
+        Write-Success "✓ Updated API endpoint to: $apiEndpoint"
+        
+        if ($apiKey) {
+            $appSettings.GpsSettings.ApiKey = $apiKey
+            Write-Success "✓ Updated API key"
+        }
+    }
+    
     # Update Azure Storage settings if configured
     if ($azureConnection) {
         $appSettings.GpsSettings.AzureStorageConnectionString = $azureConnection
         $appSettings.GpsSettings.AzureStorageContainerName = $azureContainer
         Write-Success "✓ Updated Azure Storage connection string"
         Write-Success "✓ Updated Azure Storage container name to: $azureContainer"
+    }
+    
+    # Determine the operating mode based on configuration
+    if ($apiEndpoint -and $azureConnection) {
+        $appSettings.GpsSettings.Mode = "ApiAndAzure"
+        Write-Success "✓ Mode set to: ApiAndAzure"
+    } elseif ($apiEndpoint) {
+        $appSettings.GpsSettings.Mode = "SendToApi"
+        Write-Success "✓ Mode set to: SendToApi"
+    } elseif ($azureConnection) {
+        $appSettings.GpsSettings.Mode = "SendToAzureStorage"
+        Write-Success "✓ Mode set to: SendToAzureStorage"
+    } else {
+        $appSettings.GpsSettings.Mode = "SaveToFile"
+        Write-Success "✓ Mode set to: SaveToFile"
     }
     
     # Save updated appsettings.json
@@ -174,8 +234,8 @@ if (Test-Path $appSettingsFile) {
 }
 Write-Host ""
 
-# Step 6: Create Windows Service
-Write-Warning "Step 6: Creating Windows Service..."
+# Step 7: Create Windows Service
+Write-Warning "Step 7: Creating Windows Service..."
 $exePath = Join-Path $InstallDir "$AppName.exe"
 
 if (-not (Test-Path $exePath)) {
@@ -206,8 +266,8 @@ sc.exe failure $ServiceName reset= 86400 actions= restart/60000/restart/60000/re
 Write-Success "✓ Service recovery configured (auto-restart on failure)"
 Write-Host ""
 
-# Step 7: Start the service
-Write-Warning "Step 7: Starting service..."
+# Step 8: Start the service
+Write-Warning "Step 8: Starting service..."
 try {
     Start-Service -Name $ServiceName -ErrorAction Stop
     Start-Sleep -Seconds 3
@@ -225,8 +285,8 @@ try {
 }
 Write-Host ""
 
-# Step 8: Show service status
-Write-Warning "Step 8: Service Status"
+# Step 9: Show service status
+Write-Warning "Step 9: Service Status"
 Get-Service -Name $ServiceName | Format-Table -AutoSize
 Write-Host ""
 
@@ -272,6 +332,12 @@ Write-Host "  Edit settings: $appSettingsFile"
 Write-Host "  After editing, restart the service:"
 Write-Host "  Restart-Service -Name $ServiceName"
 Write-Host ""
+
+if ($apiEndpoint) {
+    Write-Success "API is configured!"
+    Write-Host "GPS data will be sent to: $apiEndpoint"
+    Write-Host ""
+}
 
 if ($azureConnection) {
     Write-Success "Azure Storage is configured!"

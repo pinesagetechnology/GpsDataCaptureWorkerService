@@ -131,8 +131,41 @@ fi
 echo -e "${GREEN}✓${NC} Application published to ${INSTALL_DIR}"
 echo ""
 
-# Step 5: Configure Azure Storage (if needed)
-echo -e "${YELLOW}Step 5: Azure Storage Configuration${NC}"
+# Step 5: Configure API Endpoint (if needed)
+echo -e "${YELLOW}Step 5: API Endpoint Configuration${NC}"
+echo ""
+echo "Do you want to configure an API endpoint to send GPS data?"
+echo "This allows the service to automatically send GPS data to your API."
+echo ""
+read -p "Configure API Endpoint? (y/N): " CONFIGURE_API
+
+API_ENDPOINT=""
+API_KEY=""
+
+if [[ "$CONFIGURE_API" =~ ^[Yy]$ ]]; then
+    echo ""
+    echo -e "${BLUE}API Configuration:${NC}"
+    echo ""
+    
+    # Prompt for API endpoint
+    echo "Enter your API endpoint URL:"
+    echo "(Example: https://api.example.com/gps/data)"
+    read -p "API Endpoint: " API_ENDPOINT
+    
+    # Prompt for API key (optional)
+    echo ""
+    echo "Enter your API key (leave empty if not required):"
+    read -p "API Key: " API_KEY
+    
+    echo ""
+    echo -e "${GREEN}✓${NC} API will be configured with endpoint: ${API_ENDPOINT}"
+else
+    echo -e "${BLUE}ℹ${NC} Skipping API configuration"
+fi
+echo ""
+
+# Step 6: Configure Azure Storage (if needed)
+echo -e "${YELLOW}Step 6: Azure Storage Configuration${NC}"
 echo ""
 echo "Do you want to configure Azure Storage for GPS data upload?"
 echo "This allows the service to automatically upload GPS data to Azure Blob Storage."
@@ -169,8 +202,8 @@ else
 fi
 echo ""
 
-# Step 6: Update appsettings.json with shared data directory and Azure Storage
-echo -e "${YELLOW}Step 6: Configuring application settings...${NC}"
+# Step 7: Update appsettings.json with shared data directory, API, and Azure Storage
+echo -e "${YELLOW}Step 7: Configuring application settings...${NC}"
 APPSETTINGS_FILE="${INSTALL_DIR}/appsettings.json"
 
 if [ -f "${APPSETTINGS_FILE}" ]; then
@@ -181,6 +214,17 @@ if [ -f "${APPSETTINGS_FILE}" ]; then
     sed -i "s|\"DataDirectory\": \"[^\"]*\"|\"DataDirectory\": \"${DATA_DIR}\"|g" "${APPSETTINGS_FILE}"
     echo -e "${GREEN}✓${NC} Updated DataDirectory to: ${DATA_DIR}"
     
+    # Update API settings if configured
+    if [ -n "$API_ENDPOINT" ]; then
+        sed -i "s|\"ApiEndpoint\": \"[^\"]*\"|\"ApiEndpoint\": \"${API_ENDPOINT}\"|g" "${APPSETTINGS_FILE}"
+        echo -e "${GREEN}✓${NC} Updated API endpoint to: ${API_ENDPOINT}"
+        
+        if [ -n "$API_KEY" ]; then
+            sed -i "s|\"ApiKey\": \"[^\"]*\"|\"ApiKey\": \"${API_KEY}\"|g" "${APPSETTINGS_FILE}"
+            echo -e "${GREEN}✓${NC} Updated API key"
+        fi
+    fi
+    
     # Update Azure Storage settings if configured
     if [ -n "$AZURE_CONNECTION" ]; then
         sed -i "s|\"AzureStorageConnectionString\": \"[^\"]*\"|\"AzureStorageConnectionString\": \"${AZURE_CONNECTION}\"|g" "${APPSETTINGS_FILE}"
@@ -189,21 +233,36 @@ if [ -f "${APPSETTINGS_FILE}" ]; then
         echo -e "${GREEN}✓${NC} Updated Azure Storage container name to: ${AZURE_CONTAINER}"
     fi
     
+    # Determine the operating mode based on configuration
+    if [ -n "$API_ENDPOINT" ] && [ -n "$AZURE_CONNECTION" ]; then
+        sed -i "s|\"Mode\": \"[^\"]*\"|\"Mode\": \"ApiAndAzure\"|g" "${APPSETTINGS_FILE}"
+        echo -e "${GREEN}✓${NC} Mode set to: ApiAndAzure"
+    elif [ -n "$API_ENDPOINT" ]; then
+        sed -i "s|\"Mode\": \"[^\"]*\"|\"Mode\": \"SendToApi\"|g" "${APPSETTINGS_FILE}"
+        echo -e "${GREEN}✓${NC} Mode set to: SendToApi"
+    elif [ -n "$AZURE_CONNECTION" ]; then
+        sed -i "s|\"Mode\": \"[^\"]*\"|\"Mode\": \"SendToAzureStorage\"|g" "${APPSETTINGS_FILE}"
+        echo -e "${GREEN}✓${NC} Mode set to: SendToAzureStorage"
+    else
+        sed -i "s|\"Mode\": \"[^\"]*\"|\"Mode\": \"SaveToFile\"|g" "${APPSETTINGS_FILE}"
+        echo -e "${GREEN}✓${NC} Mode set to: SaveToFile"
+    fi
+    
     echo -e "${BLUE}ℹ${NC} Backup saved: ${APPSETTINGS_FILE}.bak"
 else
     echo -e "${RED}Warning: appsettings.json not found${NC}"
 fi
 echo ""
 
-# Step 7: Set ownership and permissions on install directory
-echo -e "${YELLOW}Step 7: Setting permissions...${NC}"
+# Step 8: Set ownership and permissions on install directory
+echo -e "${YELLOW}Step 8: Setting permissions...${NC}"
 chown -R ${SERVICE_USER}:${SERVICE_GROUP} ${INSTALL_DIR}
 chmod +x ${INSTALL_DIR}/${APP_NAME}
 echo -e "${GREEN}✓${NC} Set ownership and executable permissions"
 echo ""
 
-# Step 8: Create systemd service file
-echo -e "${YELLOW}Step 8: Creating systemd service file...${NC}"
+# Step 9: Create systemd service file
+echo -e "${YELLOW}Step 9: Creating systemd service file...${NC}"
 cat > ${SERVICE_FILE} << EOF
 [Unit]
 Description=GPS Data Capture Worker Service
@@ -242,15 +301,15 @@ EOF
 echo -e "${GREEN}✓${NC} Created service file: ${SERVICE_FILE}"
 echo ""
 
-# Step 9: Reload systemd and enable service
-echo -e "${YELLOW}Step 9: Enabling systemd service...${NC}"
+# Step 10: Reload systemd and enable service
+echo -e "${YELLOW}Step 10: Enabling systemd service...${NC}"
 systemctl daemon-reload
 systemctl enable ${SERVICE_NAME}
 echo -e "${GREEN}✓${NC} Service enabled"
 echo ""
 
-# Step 10: Start the service
-echo -e "${YELLOW}Step 10: Starting service...${NC}"
+# Step 11: Start the service
+echo -e "${YELLOW}Step 11: Starting service...${NC}"
 systemctl start ${SERVICE_NAME}
 sleep 2
 
@@ -263,8 +322,8 @@ else
 fi
 echo ""
 
-# Step 11: Show status
-echo -e "${YELLOW}Step 11: Service Status${NC}"
+# Step 12: Show status
+echo -e "${YELLOW}Step 12: Service Status${NC}"
 systemctl status ${SERVICE_NAME} --no-pager -l
 echo ""
 
@@ -298,5 +357,18 @@ echo ""
 echo -e "${YELLOW}To view GPS data files:${NC}"
 echo "  ls -lh ${DATA_DIR}"
 echo ""
+
+if [ -n "$API_ENDPOINT" ]; then
+    echo -e "${GREEN}API is configured!${NC}"
+    echo "GPS data will be sent to: ${API_ENDPOINT}"
+    echo ""
+fi
+
+if [ -n "$AZURE_CONNECTION" ]; then
+    echo -e "${GREEN}Azure Storage is configured!${NC}"
+    echo "GPS data will be uploaded to Azure Blob Storage container: ${AZURE_CONTAINER}"
+    echo ""
+fi
+
 echo -e "${GREEN}Installation complete! Service is running.${NC}"
 
