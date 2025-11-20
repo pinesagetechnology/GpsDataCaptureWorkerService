@@ -27,5 +27,8 @@
         // Common Settings (used by API and Azure Storage)
         public int RetryAttempts { get; set; } = 3;
         public int BatchSize { get; set; } = 10;
+
+        // Movement Detection Settings
+        public double MinimumMovementDistanceMeters { get; set; } = 10.0; // Only save/send if vehicle moved at least this distance
     }
 }

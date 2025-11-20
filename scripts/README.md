@@ -416,7 +416,7 @@ The systemd service includes security options:
 
 ## Requirements
 
-- .NET 8.0 Runtime or SDK
+- .NET 9.0 Runtime or SDK
 - Systemd (most modern Linux distributions)
 - Root access (sudo)
 - USB serial port access (for GPS device)

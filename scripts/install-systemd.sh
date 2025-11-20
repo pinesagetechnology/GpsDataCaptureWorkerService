@@ -59,10 +59,10 @@ echo ""
 # Check if .NET is installed
 if ! command -v dotnet &> /dev/null; then
     echo -e "${RED}Error: .NET SDK/Runtime is not installed${NC}"
-    echo "Please install .NET 8.0 first:"
+    echo "Please install .NET 9.0 first:"
     echo "  wget https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh"
     echo "  chmod +x dotnet-install.sh"
-    echo "  sudo ./dotnet-install.sh --channel 8.0"
+    echo "  sudo ./dotnet-install.sh --channel 9.0"
     exit 1
 fi
 
@@ -247,6 +247,14 @@ if [ -f "${APPSETTINGS_FILE}" ]; then
         sed -i "s|\"Mode\": \"[^\"]*\"|\"Mode\": \"SaveToFile\"|g" "${APPSETTINGS_FILE}"
         echo -e "${GREEN}✓${NC} Mode set to: SaveToFile"
     fi
+    
+    # Ensure MinimumMovementDistanceMeters is set (default: 10.0)
+    if ! grep -q "\"MinimumMovementDistanceMeters\"" "${APPSETTINGS_FILE}"; then
+        # Add it before the closing brace of GpsSettings section
+        # Find the last property before the closing brace and add after it
+        sed -i '/"BatchSize"/a\    "MinimumMovementDistanceMeters": 10.0' "${APPSETTINGS_FILE}"
+    fi
+    echo -e "${GREEN}✓${NC} Minimum Movement Distance configured (default: 10.0 meters)"
     
     echo -e "${BLUE}ℹ${NC} Backup saved: ${APPSETTINGS_FILE}.bak"
 else

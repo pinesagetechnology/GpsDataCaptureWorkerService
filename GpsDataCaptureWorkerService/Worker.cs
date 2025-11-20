@@ -14,6 +14,8 @@ namespace GpsDataCaptureWorkerService
         private readonly AzureStorageService? _azureStorage;
         private int _dataCounter;
         private int _invalidDataCounter;
+        private int _stationaryDataCounter;
+        private GpsData? _lastSavedPosition;
 
         public Worker(ILogger<Worker> logger,
             IOptions<GpsSettings> settings,
@@ -57,6 +59,7 @@ namespace GpsDataCaptureWorkerService
             _logger.LogInformation("GPS Data Capture Worker Service Starting...");
             _logger.LogInformation("Mode: {Mode}", _settings.Mode);
             _logger.LogInformation("Capture Interval: {Interval} seconds", _settings.CaptureIntervalSeconds);
+            _logger.LogInformation("Minimum Movement Distance: {Distance} meters", _settings.MinimumMovementDistanceMeters);
 
             // Validate configuration
             if (!ValidateConfiguration())
@@ -188,6 +191,27 @@ namespace GpsDataCaptureWorkerService
                         return;
                     }
 
+                    // Check if vehicle has moved enough to save/send data
+                    if (_lastSavedPosition != null)
+                    {
+                        double distanceMeters = CalculateDistance(
+                            _lastSavedPosition.Latitude!.Value,
+                            _lastSavedPosition.Longitude!.Value,
+                            data.Latitude!.Value,
+                            data.Longitude!.Value);
+
+                        if (distanceMeters < _settings.MinimumMovementDistanceMeters)
+                        {
+                            Interlocked.Increment(ref _stationaryDataCounter);
+                            _logger.LogDebug(
+                                "Vehicle stationary. Distance: {Distance:F2}m (threshold: {Threshold}m). Skipping save/send.",
+                                distanceMeters, _settings.MinimumMovementDistanceMeters);
+                            return;
+                        }
+
+                        _logger.LogDebug("Vehicle moved {Distance:F2} meters. Saving/sending GPS data.", distanceMeters);
+                    }
+
                     Interlocked.Increment(ref _dataCounter);
 
                     _logger.LogInformation(
@@ -218,6 +242,9 @@ namespace GpsDataCaptureWorkerService
                     {
                         _azureStorage.QueueData(data);
                     }
+
+                    // Update last saved position
+                    _lastSavedPosition = CloneGpsData(data);
                 }
                 catch (Exception ex)
                 {
@@ -246,6 +273,50 @@ namespace GpsDataCaptureWorkerService
                 return false;
 
             return true;
+        }
+
+        /// <summary>
+        /// Calculates the distance between two GPS coordinates using the Haversine formula.
+        /// Returns distance in meters.
+        /// </summary>
+        private double CalculateDistance(double lat1, double lon1, double lat2, double lon2)
+        {
+            const double earthRadiusMeters = 6371000; // Earth's radius in meters
+
+            double dLat = ToRadians(lat2 - lat1);
+            double dLon = ToRadians(lon2 - lon1);
+
+            double a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+                       Math.Cos(ToRadians(lat1)) * Math.Cos(ToRadians(lat2)) *
+                       Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+
+            double c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+            return earthRadiusMeters * c;
+        }
+
+        private double ToRadians(double degrees)
+        {
+            return degrees * Math.PI / 180.0;
+        }
+
+        private GpsData CloneGpsData(GpsData source)
+        {
+            return new GpsData
+            {
+                Timestamp = source.Timestamp,
+                Latitude = source.Latitude,
+                Longitude = source.Longitude,
+                Altitude = source.Altitude,
+                SpeedKmh = source.SpeedKmh,
+                SpeedMph = source.SpeedMph,
+                Course = source.Course,
+                CourseDirection = source.CourseDirection,
+                Satellites = source.Satellites,
+                FixQuality = source.FixQuality,
+                Hdop = source.Hdop,
+                Status = source.Status,
+                DeviceId = source.DeviceId
+            };
         }
 
         private async Task CleanupAsync()
@@ -283,6 +354,7 @@ namespace GpsDataCaptureWorkerService
             _logger.LogInformation("=== GPS Capture Summary ===");
             _logger.LogInformation("Valid GPS data points captured: {Count}", _dataCounter);
             _logger.LogInformation("Invalid GPS data points skipped: {Count}", _invalidDataCounter);
+            _logger.LogInformation("Stationary GPS data points skipped: {Count}", _stationaryDataCounter);
             _logger.LogInformation("GPS Data Capture Service stopped");
         }
 

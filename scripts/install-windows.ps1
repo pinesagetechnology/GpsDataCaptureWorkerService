@@ -47,7 +47,7 @@ try {
     Write-Success "✓ .NET SDK found: $dotnetVersion"
 } catch {
     Write-Error "✗ Error: .NET SDK is not installed"
-    Write-Host "Please install .NET 8.0 SDK from: https://dotnet.microsoft.com/download"
+    Write-Host "Please install .NET 9.0 SDK from: https://dotnet.microsoft.com/download"
     exit 1
 }
 Write-Host ""
@@ -225,6 +225,12 @@ if (Test-Path $appSettingsFile) {
         $appSettings.GpsSettings.Mode = "SaveToFile"
         Write-Success "✓ Mode set to: SaveToFile"
     }
+    
+    # Ensure MinimumMovementDistanceMeters is set (default: 10.0)
+    if (-not $appSettings.GpsSettings.MinimumMovementDistanceMeters) {
+        $appSettings.GpsSettings | Add-Member -MemberType NoteProperty -Name "MinimumMovementDistanceMeters" -Value 10.0 -Force
+    }
+    Write-Success "✓ Minimum Movement Distance: $($appSettings.GpsSettings.MinimumMovementDistanceMeters) meters"
     
     # Save updated appsettings.json
     $appSettings | ConvertTo-Json -Depth 10 | Set-Content $appSettingsFile -Encoding UTF8
