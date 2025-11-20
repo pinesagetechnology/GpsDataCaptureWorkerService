@@ -57,12 +57,33 @@ echo "  Service Group: ${SERVICE_GROUP}"
 echo ""
 
 # Check if .NET is installed
-if ! command -v dotnet &> /dev/null; then
-    echo -e "${RED}Error: .NET SDK/Runtime is not installed${NC}"
+# First, try to find dotnet in common locations
+DOTNET_PATH=""
+if command -v dotnet &> /dev/null; then
+    DOTNET_PATH="dotnet"
+elif [ -f "/root/.dotnet/dotnet" ]; then
+    DOTNET_PATH="/root/.dotnet/dotnet"
+    export PATH="/root/.dotnet:$PATH"
+elif [ -f "$HOME/.dotnet/dotnet" ]; then
+    DOTNET_PATH="$HOME/.dotnet/dotnet"
+    export PATH="$HOME/.dotnet:$PATH"
+elif [ -f "/usr/local/share/dotnet/dotnet" ]; then
+    DOTNET_PATH="/usr/local/share/dotnet/dotnet"
+    export PATH="/usr/local/share/dotnet:$PATH"
+fi
+
+if [ -z "$DOTNET_PATH" ] || ! "$DOTNET_PATH" --version &> /dev/null; then
+    echo -e "${RED}Error: .NET SDK/Runtime is not installed or not found in PATH${NC}"
+    echo ""
     echo "Please install .NET 9.0 first:"
     echo "  wget https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh"
     echo "  chmod +x dotnet-install.sh"
     echo "  sudo ./dotnet-install.sh --channel 9.0"
+    echo ""
+    echo "After installation, you may need to add .NET to PATH:"
+    echo "  export PATH=\$PATH:/root/.dotnet"
+    echo "  # Or add to ~/.bashrc for permanent:"
+    echo "  echo 'export PATH=\$PATH:/root/.dotnet' >> ~/.bashrc"
     exit 1
 fi
 
@@ -72,7 +93,8 @@ if [ ! -f "${CSPROJ_PATH}" ]; then
     exit 1
 fi
 
-echo -e "${GREEN}✓${NC} .NET SDK found: $(dotnet --version)"
+DOTNET_VERSION=$("$DOTNET_PATH" --version)
+echo -e "${GREEN}✓${NC} .NET SDK found: ${DOTNET_VERSION} (at ${DOTNET_PATH})"
 echo ""
 
 # Step 1: Create service user and group
@@ -121,8 +143,8 @@ echo ""
 # Step 4: Build and publish the application
 echo -e "${YELLOW}Step 4: Building and publishing application...${NC}"
 cd "${PROJECT_DIR}/${APP_NAME}"
-echo "Running: dotnet publish -c Release -r ${ARCH} --self-contained -o ${INSTALL_DIR}"
-dotnet publish -c Release -r ${ARCH} --self-contained -o ${INSTALL_DIR}
+echo "Running: ${DOTNET_PATH} publish -c Release -r ${ARCH} --self-contained -o ${INSTALL_DIR}"
+"${DOTNET_PATH}" publish -c Release -r ${ARCH} --self-contained -o ${INSTALL_DIR}
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Error: Build failed${NC}"
