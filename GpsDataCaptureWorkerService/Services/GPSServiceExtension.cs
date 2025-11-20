@@ -27,6 +27,10 @@ namespace GpsDataCaptureWorkerService.Services
             services.AddSingleton<IAzureStorageService, AzureStorageService>();
             services.AddSingleton<AzureStorageService>();
             
+            // Register PostgreSQL Storage service
+            services.AddSingleton<IPostgresStorageService, PostgresStorageService>();
+            services.AddSingleton<PostgresStorageService>();
+            
             // Add HttpClient factory for proper lifecycle management
             services.AddHttpClient();
 

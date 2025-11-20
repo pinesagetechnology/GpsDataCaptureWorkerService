@@ -24,6 +24,10 @@
         public string AzureStorageContainerName { get; set; } = "gps-data";
         public bool AzureStoragePrettyJson { get; set; } = false;
 
+        // PostgreSQL Settings
+        public string PostgresConnectionString { get; set; } = string.Empty;
+        public bool PostgresStoreRawData { get; set; } = false; // Store raw GPS data in raw_data column
+
         // Common Settings (used by API and Azure Storage)
         public int RetryAttempts { get; set; } = 3;
         public int BatchSize { get; set; } = 10;

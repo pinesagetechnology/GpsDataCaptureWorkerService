@@ -12,6 +12,7 @@ namespace GpsDataCaptureWorkerService
         private readonly FileStorageService? _fileStorage;
         private readonly ApiSenderService? _apiSender;
         private readonly AzureStorageService? _azureStorage;
+        private readonly PostgresStorageService? _postgresStorage;
         private int _dataCounter;
         private int _invalidDataCounter;
         private int _stationaryDataCounter;
@@ -22,7 +23,8 @@ namespace GpsDataCaptureWorkerService
             GpsReaderService gpsReader,
             FileStorageService fileStorage,
             ApiSenderService apiSender,
-            AzureStorageService azureStorage)
+            AzureStorageService azureStorage,
+            PostgresStorageService postgresStorage)
         {
             _logger = logger;
             _settings = settings.Value;
@@ -32,6 +34,9 @@ namespace GpsDataCaptureWorkerService
             if (_settings.Mode == DataMode.SaveToFile || 
                 _settings.Mode == DataMode.FileAndApi || 
                 _settings.Mode == DataMode.FileAndAzure || 
+                _settings.Mode == DataMode.FileAndPostgres ||
+                _settings.Mode == DataMode.FileApiAndPostgres ||
+                _settings.Mode == DataMode.FileAzureAndPostgres ||
                 _settings.Mode == DataMode.All)
             {
                 _fileStorage = fileStorage;
@@ -40,6 +45,9 @@ namespace GpsDataCaptureWorkerService
             if (_settings.Mode == DataMode.SendToApi || 
                 _settings.Mode == DataMode.FileAndApi || 
                 _settings.Mode == DataMode.ApiAndAzure || 
+                _settings.Mode == DataMode.ApiAndPostgres ||
+                _settings.Mode == DataMode.FileApiAndPostgres ||
+                _settings.Mode == DataMode.ApiAzureAndPostgres ||
                 _settings.Mode == DataMode.All)
             {
                 _apiSender = apiSender;
@@ -48,9 +56,24 @@ namespace GpsDataCaptureWorkerService
             if (_settings.Mode == DataMode.SendToAzureStorage || 
                 _settings.Mode == DataMode.FileAndAzure || 
                 _settings.Mode == DataMode.ApiAndAzure || 
+                _settings.Mode == DataMode.AzureAndPostgres ||
+                _settings.Mode == DataMode.FileAzureAndPostgres ||
+                _settings.Mode == DataMode.ApiAzureAndPostgres ||
                 _settings.Mode == DataMode.All)
             {
                 _azureStorage = azureStorage;
+            }
+
+            if (_settings.Mode == DataMode.SaveToPostgres ||
+                _settings.Mode == DataMode.FileAndPostgres ||
+                _settings.Mode == DataMode.ApiAndPostgres ||
+                _settings.Mode == DataMode.AzureAndPostgres ||
+                _settings.Mode == DataMode.FileApiAndPostgres ||
+                _settings.Mode == DataMode.FileAzureAndPostgres ||
+                _settings.Mode == DataMode.ApiAzureAndPostgres ||
+                _settings.Mode == DataMode.All)
+            {
+                _postgresStorage = postgresStorage;
             }
         }
 
@@ -102,10 +125,13 @@ namespace GpsDataCaptureWorkerService
 
         private bool ValidateConfiguration()
         {
-            // Validate API settings
+                    // Validate API settings
             if (_settings.Mode == DataMode.SendToApi || 
                 _settings.Mode == DataMode.FileAndApi || 
                 _settings.Mode == DataMode.ApiAndAzure || 
+                _settings.Mode == DataMode.ApiAndPostgres ||
+                _settings.Mode == DataMode.FileApiAndPostgres ||
+                _settings.Mode == DataMode.ApiAzureAndPostgres ||
                 _settings.Mode == DataMode.All)
             {
                 if (string.IsNullOrEmpty(_settings.ApiEndpoint))
@@ -121,6 +147,9 @@ namespace GpsDataCaptureWorkerService
             if (_settings.Mode == DataMode.SendToAzureStorage || 
                 _settings.Mode == DataMode.FileAndAzure || 
                 _settings.Mode == DataMode.ApiAndAzure || 
+                _settings.Mode == DataMode.AzureAndPostgres ||
+                _settings.Mode == DataMode.FileAzureAndPostgres ||
+                _settings.Mode == DataMode.ApiAzureAndPostgres ||
                 _settings.Mode == DataMode.All)
             {
                 if (string.IsNullOrEmpty(_settings.AzureStorageConnectionString))
@@ -133,10 +162,33 @@ namespace GpsDataCaptureWorkerService
                     _settings.AzureStorageContainerName);
             }
 
+            // Validate PostgreSQL settings
+            if (_settings.Mode == DataMode.SaveToPostgres ||
+                _settings.Mode == DataMode.FileAndPostgres ||
+                _settings.Mode == DataMode.ApiAndPostgres ||
+                _settings.Mode == DataMode.AzureAndPostgres ||
+                _settings.Mode == DataMode.FileApiAndPostgres ||
+                _settings.Mode == DataMode.FileAzureAndPostgres ||
+                _settings.Mode == DataMode.ApiAzureAndPostgres ||
+                _settings.Mode == DataMode.All)
+            {
+                if (string.IsNullOrEmpty(_settings.PostgresConnectionString))
+                {
+                    _logger.LogError("PostgreSQL connection string not configured but {Mode} mode is enabled!", _settings.Mode);
+                    return false;
+                }
+
+                _logger.LogInformation("PostgreSQL configured. Database: {Database}", 
+                    ExtractDatabaseFromConnectionString(_settings.PostgresConnectionString));
+            }
+
             // Validate File Storage settings
             if (_settings.Mode == DataMode.SaveToFile || 
                 _settings.Mode == DataMode.FileAndApi || 
                 _settings.Mode == DataMode.FileAndAzure || 
+                _settings.Mode == DataMode.FileAndPostgres ||
+                _settings.Mode == DataMode.FileApiAndPostgres ||
+                _settings.Mode == DataMode.FileAzureAndPostgres ||
                 _settings.Mode == DataMode.All)
             {
                 _logger.LogInformation("File storage enabled. Formats: {Formats}",
@@ -144,6 +196,20 @@ namespace GpsDataCaptureWorkerService
             }
 
             return true;
+        }
+
+        private string ExtractDatabaseFromConnectionString(string connectionString)
+        {
+            try
+            {
+                var parts = connectionString.Split(';');
+                var dbPart = parts.FirstOrDefault(p => p.StartsWith("Database=", StringComparison.OrdinalIgnoreCase));
+                return dbPart?.Split('=')[1] ?? "unknown";
+            }
+            catch
+            {
+                return "unknown";
+            }
         }
 
         private async Task<bool> ConnectWithRetryAsync(CancellationToken cancellationToken)
@@ -243,6 +309,12 @@ namespace GpsDataCaptureWorkerService
                         _azureStorage.QueueData(data);
                     }
 
+                    // Save to PostgreSQL if enabled
+                    if (_postgresStorage != null)
+                    {
+                        await _postgresStorage.SaveAsync(data);
+                    }
+
                     // Update last saved position
                     _lastSavedPosition = CloneGpsData(data);
                 }
@@ -338,6 +410,13 @@ namespace GpsDataCaptureWorkerService
                 _logger.LogInformation("Flushing remaining Azure Storage data...");
                 await _azureStorage.FlushAsync();
                 _azureStorage.Dispose();
+            }
+
+            if (_postgresStorage != null)
+            {
+                _logger.LogInformation("Flushing remaining PostgreSQL data...");
+                await _postgresStorage.FlushAsync();
+                _postgresStorage.Dispose();
             }
 
             if (_fileStorage != null)
