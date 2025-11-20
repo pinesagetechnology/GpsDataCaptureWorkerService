@@ -183,22 +183,78 @@ if [[ "$CONFIGURE_AZURE" =~ ^[Yy]$ ]]; then
     # Prompt for connection string
     echo "Enter your Azure Storage connection string:"
     echo "(You can find this in Azure Portal > Storage Account > Access Keys)"
-    read -p "Connection String: " AZURE_CONNECTION
-    
-    # Prompt for container name with default
+    echo "(Format: DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;EndpointSuffix=core.windows.net)"
     echo ""
-    echo "Enter the container name for GPS data:"
-    read -p "Container Name [gps-data]: " AZURE_CONTAINER_INPUT
+    read -p "Azure Storage Connection String: " AZURE_CONNECTION
     
-    # Use default if empty
-    if [ -n "$AZURE_CONTAINER_INPUT" ]; then
-        AZURE_CONTAINER="$AZURE_CONTAINER_INPUT"
+    # Validate connection string is not empty
+    if [ -z "$AZURE_CONNECTION" ]; then
+        echo -e "${YELLOW}⚠${NC} Azure Storage connection string is empty. Skipping Azure Storage configuration."
+        AZURE_CONNECTION=""
+    else
+        # Prompt for container name with default
+        echo ""
+        echo "Enter the container name for GPS data:"
+        read -p "Container Name [gps-data]: " AZURE_CONTAINER_INPUT
+        
+        # Use default if empty
+        if [ -n "$AZURE_CONTAINER_INPUT" ]; then
+            AZURE_CONTAINER="$AZURE_CONTAINER_INPUT"
+        fi
+        
+        echo ""
+        echo -e "${GREEN}✓${NC} Azure Storage will be configured with container: ${AZURE_CONTAINER}"
     fi
-    
-    echo ""
-    echo -e "${GREEN}✓${NC} Azure Storage will be configured with container: ${AZURE_CONTAINER}"
 else
     echo -e "${BLUE}ℹ${NC} Skipping Azure Storage configuration"
+fi
+echo ""
+
+# Step 6b: Configure PostgreSQL (if needed)
+echo -e "${YELLOW}Step 6b: PostgreSQL Configuration${NC}"
+echo ""
+echo "Do you want to configure PostgreSQL for GPS data storage?"
+echo "This allows the service to automatically save GPS data to PostgreSQL database."
+echo ""
+read -p "Configure PostgreSQL? (y/N): " CONFIGURE_POSTGRES
+
+POSTGRES_CONNECTION=""
+POSTGRES_STORE_RAW_DATA="false"
+
+if [[ "$CONFIGURE_POSTGRES" =~ ^[Yy]$ ]]; then
+    echo ""
+    echo -e "${BLUE}PostgreSQL Configuration:${NC}"
+    echo ""
+    
+    # Prompt for connection string
+    echo "Enter your PostgreSQL connection string:"
+    echo "(Format: Host=localhost;Port=5432;Database=iot_gateway;Username=user;Password=pass;Pooling=true;Minimum Pool Size=1;Maximum Pool Size=10;)"
+    echo ""
+    read -p "PostgreSQL Connection String: " POSTGRES_CONNECTION
+    
+    # Validate connection string is not empty
+    if [ -z "$POSTGRES_CONNECTION" ]; then
+        echo -e "${YELLOW}⚠${NC} PostgreSQL connection string is empty. Skipping PostgreSQL configuration."
+        POSTGRES_CONNECTION=""
+    else
+        # Prompt for raw data storage
+        echo ""
+        echo "Do you want to store raw GPS data as JSON in the database?"
+        echo "(This stores the complete GPS data as JSON in the raw_data column)"
+        read -p "Store Raw Data? (y/N) [N]: " STORE_RAW_INPUT
+        
+        if [[ "$STORE_RAW_INPUT" =~ ^[Yy]$ ]]; then
+            POSTGRES_STORE_RAW_DATA="true"
+        fi
+        
+        echo ""
+        echo -e "${GREEN}✓${NC} PostgreSQL will be configured"
+        if [ "$POSTGRES_STORE_RAW_DATA" = "true" ]; then
+            echo -e "${GREEN}✓${NC} Raw data storage enabled"
+        fi
+    fi
+else
+    echo -e "${BLUE}ℹ${NC} Skipping PostgreSQL configuration"
 fi
 echo ""
 
@@ -227,26 +283,46 @@ if [ -f "${APPSETTINGS_FILE}" ]; then
     
     # Update Azure Storage settings if configured
     if [ -n "$AZURE_CONNECTION" ]; then
-        sed -i "s|\"AzureStorageConnectionString\": \"[^\"]*\"|\"AzureStorageConnectionString\": \"${AZURE_CONNECTION}\"|g" "${APPSETTINGS_FILE}"
+        # Escape special characters in connection string for sed
+        AZURE_CONNECTION_ESCAPED=$(printf '%s\n' "$AZURE_CONNECTION" | sed 's/[[\.*^$()+?{|]/\\&/g')
+        sed -i "s|\"AzureStorageConnectionString\": \"[^\"]*\"|\"AzureStorageConnectionString\": \"${AZURE_CONNECTION_ESCAPED}\"|g" "${APPSETTINGS_FILE}"
         sed -i "s|\"AzureStorageContainerName\": \"[^\"]*\"|\"AzureStorageContainerName\": \"${AZURE_CONTAINER}\"|g" "${APPSETTINGS_FILE}"
         echo -e "${GREEN}✓${NC} Updated Azure Storage connection string"
         echo -e "${GREEN}✓${NC} Updated Azure Storage container name to: ${AZURE_CONTAINER}"
     fi
     
-    # Determine the operating mode based on configuration
-    if [ -n "$API_ENDPOINT" ] && [ -n "$AZURE_CONNECTION" ]; then
-        sed -i "s|\"Mode\": \"[^\"]*\"|\"Mode\": \"ApiAndAzure\"|g" "${APPSETTINGS_FILE}"
-        echo -e "${GREEN}✓${NC} Mode set to: ApiAndAzure"
-    elif [ -n "$API_ENDPOINT" ]; then
-        sed -i "s|\"Mode\": \"[^\"]*\"|\"Mode\": \"SendToApi\"|g" "${APPSETTINGS_FILE}"
-        echo -e "${GREEN}✓${NC} Mode set to: SendToApi"
-    elif [ -n "$AZURE_CONNECTION" ]; then
-        sed -i "s|\"Mode\": \"[^\"]*\"|\"Mode\": \"SendToAzureStorage\"|g" "${APPSETTINGS_FILE}"
-        echo -e "${GREEN}✓${NC} Mode set to: SendToAzureStorage"
-    else
-        sed -i "s|\"Mode\": \"[^\"]*\"|\"Mode\": \"SaveToFile\"|g" "${APPSETTINGS_FILE}"
-        echo -e "${GREEN}✓${NC} Mode set to: SaveToFile"
+    # Update PostgreSQL settings if configured
+    if [ -n "$POSTGRES_CONNECTION" ]; then
+        # Escape special characters in connection string for sed
+        POSTGRES_CONNECTION_ESCAPED=$(printf '%s\n' "$POSTGRES_CONNECTION" | sed 's/[[\.*^$()+?{|]/\\&/g')
+        sed -i "s|\"PostgresConnectionString\": \"[^\"]*\"|\"PostgresConnectionString\": \"${POSTGRES_CONNECTION_ESCAPED}\"|g" "${APPSETTINGS_FILE}"
+        sed -i "s|\"PostgresStoreRawData\": [a-z]*|\"PostgresStoreRawData\": ${POSTGRES_STORE_RAW_DATA}|g" "${APPSETTINGS_FILE}"
+        echo -e "${GREEN}✓${NC} Updated PostgreSQL connection string"
+        echo -e "${GREEN}✓${NC} Updated PostgreSQL raw data storage: ${POSTGRES_STORE_RAW_DATA}"
     fi
+    
+    # Determine the operating mode based on configuration
+    MODE=""
+    if [ -n "$API_ENDPOINT" ] && [ -n "$AZURE_CONNECTION" ] && [ -n "$POSTGRES_CONNECTION" ]; then
+        MODE="ApiAzureAndPostgres"
+    elif [ -n "$API_ENDPOINT" ] && [ -n "$AZURE_CONNECTION" ]; then
+        MODE="ApiAndAzure"
+    elif [ -n "$API_ENDPOINT" ] && [ -n "$POSTGRES_CONNECTION" ]; then
+        MODE="ApiAndPostgres"
+    elif [ -n "$AZURE_CONNECTION" ] && [ -n "$POSTGRES_CONNECTION" ]; then
+        MODE="AzureAndPostgres"
+    elif [ -n "$API_ENDPOINT" ]; then
+        MODE="SendToApi"
+    elif [ -n "$AZURE_CONNECTION" ]; then
+        MODE="SendToAzureStorage"
+    elif [ -n "$POSTGRES_CONNECTION" ]; then
+        MODE="SaveToPostgres"
+    else
+        MODE="SaveToFile"
+    fi
+    
+    sed -i "s|\"Mode\": \"[^\"]*\"|\"Mode\": \"${MODE}\"|g" "${APPSETTINGS_FILE}"
+    echo -e "${GREEN}✓${NC} Mode set to: ${MODE}"
     
     # Ensure MinimumMovementDistanceMeters is set (default: 10.0)
     if ! grep -q "\"MinimumMovementDistanceMeters\"" "${APPSETTINGS_FILE}"; then

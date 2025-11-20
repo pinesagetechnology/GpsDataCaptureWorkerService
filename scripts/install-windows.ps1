@@ -158,22 +158,79 @@ if ($configureAzure -match '^[Yy]$') {
     # Prompt for connection string
     Write-Host "Enter your Azure Storage connection string:"
     Write-Host "(You can find this in Azure Portal > Storage Account > Access Keys)"
-    $azureConnection = Read-Host "Connection String"
-    
-    # Prompt for container name with default
+    Write-Host "(Format: DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;EndpointSuffix=core.windows.net)"
     Write-Host ""
-    Write-Host "Enter the container name for GPS data:"
-    $containerInput = Read-Host "Container Name [gps-data]"
+    $azureConnection = Read-Host "Azure Storage Connection String"
     
-    # Use default if empty
-    if ($containerInput) {
-        $azureContainer = $containerInput
+    # Validate connection string is not empty
+    if ([string]::IsNullOrWhiteSpace($azureConnection)) {
+        Write-Warning "⚠ Azure Storage connection string is empty. Skipping Azure Storage configuration."
+        $azureConnection = ""
+    } else {
+        # Prompt for container name with default
+        Write-Host ""
+        Write-Host "Enter the container name for GPS data:"
+        $containerInput = Read-Host "Container Name [gps-data]"
+        
+        # Use default if empty
+        if ($containerInput) {
+            $azureContainer = $containerInput
+        }
+        
+        Write-Host ""
+        Write-Success "✓ Azure Storage will be configured with container: $azureContainer"
     }
-    
-    Write-Host ""
-    Write-Success "✓ Azure Storage will be configured with container: $azureContainer"
 } else {
     Write-Info "ℹ Skipping Azure Storage configuration"
+}
+Write-Host ""
+
+# Step 5b: Configure PostgreSQL (if needed)
+Write-Warning "Step 5b: PostgreSQL Configuration"
+Write-Host ""
+Write-Host "Do you want to configure PostgreSQL for GPS data storage?"
+Write-Host "This allows the service to automatically save GPS data to PostgreSQL database."
+Write-Host ""
+
+$configurePostgres = Read-Host "Configure PostgreSQL? (y/N)"
+
+$postgresConnection = ""
+$postgresStoreRawData = $false
+
+if ($configurePostgres -match '^[Yy]$') {
+    Write-Host ""
+    Write-Info "PostgreSQL Configuration:"
+    Write-Host ""
+    
+    # Prompt for connection string
+    Write-Host "Enter your PostgreSQL connection string:"
+    Write-Host "(Format: Host=localhost;Port=5432;Database=iot_gateway;Username=user;Password=pass;Pooling=true;Minimum Pool Size=1;Maximum Pool Size=10;)"
+    Write-Host ""
+    $postgresConnection = Read-Host "PostgreSQL Connection String"
+    
+    # Validate connection string is not empty
+    if ([string]::IsNullOrWhiteSpace($postgresConnection)) {
+        Write-Warning "⚠ PostgreSQL connection string is empty. Skipping PostgreSQL configuration."
+        $postgresConnection = ""
+    } else {
+        # Prompt for raw data storage
+        Write-Host ""
+        Write-Host "Do you want to store raw GPS data as JSON in the database?"
+        Write-Host "(This stores the complete GPS data as JSON in the raw_data column)"
+        $storeRawInput = Read-Host "Store Raw Data? (y/N) [N]"
+        
+        if ($storeRawInput -match '^[Yy]$') {
+            $postgresStoreRawData = $true
+        }
+        
+        Write-Host ""
+        Write-Success "✓ PostgreSQL will be configured"
+        if ($postgresStoreRawData) {
+            Write-Success "✓ Raw data storage enabled"
+        }
+    }
+} else {
+    Write-Info "ℹ Skipping PostgreSQL configuration"
 }
 Write-Host ""
 
@@ -211,19 +268,48 @@ if (Test-Path $appSettingsFile) {
         Write-Success "✓ Updated Azure Storage container name to: $azureContainer"
     }
     
+    # Update PostgreSQL settings if configured
+    if ($postgresConnection) {
+        $appSettings.GpsSettings.PostgresConnectionString = $postgresConnection
+        $appSettings.GpsSettings.PostgresStoreRawData = $postgresStoreRawData
+        Write-Success "✓ Updated PostgreSQL connection string"
+        Write-Success "✓ Updated PostgreSQL raw data storage: $postgresStoreRawData"
+    }
+    
     # Determine the operating mode based on configuration
-    if ($apiEndpoint -and $azureConnection) {
-        $appSettings.GpsSettings.Mode = "ApiAndAzure"
-        Write-Success "✓ Mode set to: ApiAndAzure"
-    } elseif ($apiEndpoint) {
-        $appSettings.GpsSettings.Mode = "SendToApi"
-        Write-Success "✓ Mode set to: SendToApi"
-    } elseif ($azureConnection) {
-        $appSettings.GpsSettings.Mode = "SendToAzureStorage"
-        Write-Success "✓ Mode set to: SendToAzureStorage"
-    } else {
+    $modeComponents = @()
+    if ($apiEndpoint) { $modeComponents += "Api" }
+    if ($azureConnection) { $modeComponents += "Azure" }
+    if ($postgresConnection) { $modeComponents += "Postgres" }
+    
+    if ($modeComponents.Count -eq 0) {
         $appSettings.GpsSettings.Mode = "SaveToFile"
         Write-Success "✓ Mode set to: SaveToFile"
+    } elseif ($modeComponents.Count -eq 1) {
+        if ($apiEndpoint) {
+            $appSettings.GpsSettings.Mode = "SendToApi"
+            Write-Success "✓ Mode set to: SendToApi"
+        } elseif ($azureConnection) {
+            $appSettings.GpsSettings.Mode = "SendToAzureStorage"
+            Write-Success "✓ Mode set to: SendToAzureStorage"
+        } elseif ($postgresConnection) {
+            $appSettings.GpsSettings.Mode = "SaveToPostgres"
+            Write-Success "✓ Mode set to: SaveToPostgres"
+        }
+    } else {
+        # Multiple modes - use appropriate combined mode
+        $hasFile = $false  # File mode is default, not explicitly requested
+        $modeString = [string]::Join("", $modeComponents)
+        
+        # Map to enum values
+        switch ($modeString) {
+            "ApiAzure" { $appSettings.GpsSettings.Mode = "ApiAndAzure" }
+            "ApiPostgres" { $appSettings.GpsSettings.Mode = "ApiAndPostgres" }
+            "AzurePostgres" { $appSettings.GpsSettings.Mode = "AzureAndPostgres" }
+            "ApiAzurePostgres" { $appSettings.GpsSettings.Mode = "ApiAzureAndPostgres" }
+            default { $appSettings.GpsSettings.Mode = "All" }
+        }
+        Write-Success "✓ Mode set to: $($appSettings.GpsSettings.Mode)"
     }
     
     # Ensure MinimumMovementDistanceMeters is set (default: 10.0)
